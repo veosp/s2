@@ -41,9 +41,6 @@ Ubuntu /etc/hosts entry:
 
 Verification: `ip -brief address` and `hostname -f`.
 
-VPN routing previously interfered with Host-only access.
-The successful SSH connection by hostname was tested with VPN disabled.
-
 ## 3. Port forwarding
 
 Adapter 1, NAT, TCP:
@@ -52,8 +49,6 @@ Adapter 1, NAT, TCP:
 - Host port: 2222.
 - Guest address: unspecified.
 - Guest port: 2222.
-
-Before SSH hardening, the guest port was 22.
 
 ## 4. User accounts and authentication
 
@@ -164,9 +159,6 @@ sudo ufw status verbose
 
 Verify a new SSH connection after enabling UFW.
 
-An earlier practical-work-5 request, before the DHCP address changed, produced:
-SRC=192.168.56.1, DST=192.168.56.102, PROTO=TCP, DPT=8080.
-
 ## 7. Snapshots and recovery order
 
 | Snapshot | Created, UTC | Purpose |
@@ -234,55 +226,65 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-The configuration-copy commands assume a copy of this repository is present on
-the VM. Restore the site content from WSL using section 10. A new certificate
-requires copying the new public certificate to the client again. Keep the
-private key on the server; it is not included in this repository.
+Run the configuration-copy commands from the repository on the VM.
+Copy a regenerated public certificate to the client again.
 
 ## 9. Containerization
 
-- Engine: Docker CE 29.9.2 from the official `download.docker.com` Ubuntu apt repository.
-- Compose plugin: 5.6.1. Buildx: 0.38.1. The `docker.io` and Snap packages are not used.
-- Install helper: `scripts/install-docker-engine.sh`; installation transcript is in
-  `evidence/practice7/docker-install.log`.
-- Docker-enabled user: `devops`, already a sudo administrator. Docker-group
-  membership grants root-equivalent access to the Docker host.
-- Host source directory: the repository's `app/` directory in WSL.
-- VM project directory: `/home/devops/app`; Compose project name: `app`.
-- Container names: `app-app-1` and `app-db-1`.
-- App image: `devops-app:1.0`, based on `python:3.12-slim`.
-- Database image: `postgres:16-alpine`; keep the major version fixed for this data volume.
-- Main process: Gunicorn in exec form, user `app`, observed UID/GID 999.
-- Image source files are root-owned and mode 644; the app user cannot modify them.
-- Application publication: `127.0.0.1:5000:5000` only.
-- PostgreSQL listens on container port 5432, with no published host port.
-- Private Compose bridge: `app_backend`; the app resolves the database as `db`.
-- Persistent named volume: `app_db_data`, mounted at `/var/lib/postgresql/data`.
-- Server-only secret file: `/home/devops/app/.env`, owned by devops, mode 600.
-- Public template: `app/.env.example`. `.gitignore` and `.dockerignore` exclude `.env`.
-- Dependency versions follow the handout: Flask 3.0.3, psycopg2-binary 2.9.9, Gunicorn 22.0.0.
-- Database readiness uses `pg_isready`; app startup waits for `service_healthy`.
-- The app has an HTTP `/health` healthcheck. Both services use `unless-stopped`.
-- Container logs are rotated at 10 MiB, retaining three files per service.
+| Setting | Value |
+|---|---|
+| Installation source | Official Docker Ubuntu apt repository |
+| Docker Engine / Compose / Buildx | 29.9.2 / 5.6.1 / 0.38.1 |
+| Docker group member | devops |
+| VM project | /home/devops/app |
+| Images | devops-app:1.0, postgres:16-alpine |
+| App process | app, UID/GID 999 |
+| App publication | 127.0.0.1:5000:5000 |
+| Database publication | None |
+| Network / database hostname | app_backend / db |
+| Volume / mount | app_db_data /var/lib/postgresql/data |
+| Secret | /home/devops/app/.env, devops:devops, mode 600 |
+| Reverse proxy | /app/ to http://127.0.0.1:5000/ |
 
-Initial Docker installation on the VM:
+Docker installation [VM]:
 
 ```bash
-sudo bash ~/devops-course-2026/scripts/install-docker-engine.sh
+sudo apt update
+sudo apt install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod 0644 /etc/apt/keyrings/docker.asc
+. /etc/os-release
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: ${UBUNTU_CODENAME:-$VERSION_CODENAME}
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now containerd docker
+sudo usermod -aG docker devops
 ```
 
-Reconnect SSH after joining the docker group. Verify `docker version`,
-`docker compose version`, and `docker run --rm hello-world` as devops.
+Reconnect SSH, then verify [VM]:
 
-Transfer application source from the repository root in WSL:
+```bash
+docker version
+docker compose version
+docker run --rm hello-world
+```
+
+Application delivery from the repository root [WSL]:
 
 ```bash
 rsync -avz --delete --exclude=.env --chmod=D755,F644 --dry-run app/ devops:app/
 rsync -avz --delete --exclude=.env --chmod=D755,F644 app/ devops:app/
 ```
 
-The exclusion protects the existing server `.env` from `--delete`. On a fresh VM,
-create the secret locally and start the project as devops:
+Initial configuration and startup [VM]:
 
 ```bash
 cd ~/app
@@ -296,37 +298,17 @@ docker compose ps
 curl -f http://127.0.0.1:5000/health
 ```
 
-The password is generated only on the VM and is never copied into the host
-checkout. Avoid printing expanded `docker compose config` output or complete
-container environment dumps into the report; `--quiet` validates without secrets.
-
-Nginx forwards `/app/` to the app and strips that prefix because `proxy_pass`
-ends in `/`. It passes Host, X-Real-IP, X-Forwarded-For and X-Forwarded-Proto.
-The existing HTTPS certificate and static document root are unchanged.
-
-`docker compose down` preserves `app_db_data`. `down -v` deletes project volumes;
-the destructive demonstration was performed on an isolated disposable project
-using loopback port 5002. The main volume was preserved. The temporary public
-port-5001 demonstration and deliberately public port-5000 audit test were restored.
-
 ## 10. WSL client and deployment
 
-- Host-side Linux: Ubuntu under WSL 1, user `q`.
+- Client: Ubuntu under WSL 1, user q.
+- Repository: veosp/s2, default branch main.
 - Windows checkout: `C:\Users\Q\Other\HW\Devops\Core\tasks`.
-- WSL path: `/mnt/c/Users/Q/Other/HW/Devops/Core/tasks`.
-- Existing repository: `veosp/s2`; base branch: `master`.
-- Practical-work branch: `feature/web-deploy`.
-- The handout calls the base branch `main`; this existing repository uses `master`.
-- WSL private key: `/home/q/.ssh/devops_vm`, mode 600.
-- WSL SSH configuration: `/home/q/.ssh/config`, mode 600.
-- Trusted public certificate: `/home/q/devops.crt`.
-- `.gitattributes` retains LF endings for the shell scripts and exercise artifacts.
-- Repository-local `core.autocrlf=true` matches Git for Windows; `core.fileMode=false`
-  avoids false executable-bit changes on `/mnt/c`.
-- VPN routing/filtering previously blocked WSL traffic and Host-only connections.
-  Successful final checks were performed with the interfering VPN disconnected.
+- WSL checkout: `/mnt/c/Users/Q/Other/HW/Devops/Core/tasks`.
+- SSH private key: `/home/q/.ssh/devops_vm`, mode 600.
+- SSH configuration: `/home/q/.ssh/config`, mode 600.
+- Trusted certificate: `/home/q/devops.crt`.
 
-Copy the client configuration from Windows into WSL:
+Client configuration [WSL]:
 
 ```bash
 mkdir -p ~/.ssh
@@ -335,16 +317,12 @@ cp /mnt/c/Users/Q/.ssh/devops_vm ~/.ssh/
 cp /mnt/c/Users/Q/.ssh/config ~/.ssh/
 cp /mnt/c/Users/Q/.ssh/known_hosts ~/.ssh/
 chmod 600 ~/.ssh/devops_vm ~/.ssh/config ~/.ssh/known_hosts
+git config core.fileMode false
 ssh -o BatchMode=yes devops 'hostname -f'
 scp devops:/etc/ssl/certs/devops.crt ~/devops.crt
 ```
 
-`BatchMode=yes` makes an unsuitable key fail immediately instead of requesting
-interactive credentials. The existing trusted host-key entries are retained.
-The SSH alias uses NAT port forwarding at 127.0.0.1:2222, whereas web requests
-use the Host-only address 192.168.56.101 directly.
-
-Manual content synchronization from the repository root in WSL:
+Initial site delivery from the repository root [WSL]:
 
 ```bash
 rsync -avz --delete --chmod=D755,F644 --dry-run site/ devops:/var/www/devops-site/
@@ -353,49 +331,16 @@ curl --cacert ~/devops.crt -I https://devops.local/
 curl --cacert ~/devops.crt -I https://devops.local/no-such-page
 ```
 
-The first request must return 200; the missing page must return 404 with the
-custom error-page body. The trailing slash after `site/` copies its contents.
-The destination path is dedicated to the site; `--delete` removes stale files
-only within that destination.
-
-After committing the exercise files, use:
+Subsequent deployment requires a clean working tree [WSL]:
 
 ```bash
 bash scripts/deploy.sh --dry-run
 bash scripts/deploy.sh
 ```
 
-The script locates the repository from its own path, rejects missing or
-untracked `site/index.html` and all uncommitted changes, synchronizes using one
-rsync/SSH operation, checks HTTPS using the trusted certificate, and prints the
-short HEAD hash on success. A dry run does not check service availability.
-SSH multiplexing reduces repeated connections during rapid successive runs.
-
-## 11. Verification and evidence
+Configuration audit [VM]:
 
 ```bash
-# VM
-sudo bash /home/devops/devops-course-2026/scripts/audit.sh
+sudo bash ~/devops-course-2026/scripts/audit.sh
 echo $?
-
-# WSL, repository root: offline contract tests
-bash tests/test-deploy.sh
 ```
-
-The audit checks SSH, UFW, Nginx service state and configuration, at least 30 days
-of certificate lifetime, absence of world-writable site content, and private-key
-ownership/mode. `CERT_MIN_DAYS=400` deliberately exercises the expiry failure.
-
-Practice 7 adds four checks: Docker active, database healthy, loopback-only app
-publication with no database publication, and server `.env` mode/ownership.
-The current total is fourteen; the saved practice-6 transcripts retain their
-original ten-check results. Use `docs/practice7-validation.md` and
-`docs/practice7-screenshots.md` for container tests and report evidence.
-
-`scripts/practice6-verify.sh` is a VM-only, sudo-run classroom verifier. It
-records permission experiments, a short real Nginx outage, audit failures and
-recovery, and HTTP-log analysis. It restores the working content, safe modes,
-and Nginx before returning. Raw transcripts are in `evidence/practice6/`, ignored
-by Git. See `docs/practice6-validation.md` for the distinction between real
-integration evidence and mocked contract tests, and `docs/practice6-screenshots.md`
-for a short screenshot checklist.
