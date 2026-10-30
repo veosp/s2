@@ -5,6 +5,7 @@
 - VirtualBox VM name: ubuntu-server.
 - Operating system: Ubuntu Server 26.04.1 LTS.
 - CPU: 2 virtual cores.
+- Configured RAM: 4096 MiB.
 - Memory reported by Linux: 3.3 GiB.
 - Swap: 2 GiB.
 - Virtual disk: 25 GiB.
@@ -16,14 +17,14 @@
 | Interface | Mode | Address | Purpose |
 |---|---|---|---|
 | enp0s3 | NAT | 10.0.2.15/24 | Internet access |
-| enp0s8 | Host-only | 192.168.56.102/24 | Communication with Windows |
+| enp0s8 | Host-only | 192.168.56.101/24 | Communication with Windows |
 
 Windows Host-only adapter: Ethernet 2, 192.168.56.1/24.
 
 Windows file: C:\Windows\System32\drivers\etc\hosts
 
 ```text
-192.168.56.102 devops.local
+192.168.56.101 devops.local
 ```
 
 Ubuntu hostname:
@@ -67,8 +68,8 @@ id devops || sudo adduser devops
 sudo usermod -aG sudo devops
 ```
 
-Windows private key: C:\Users\ovlad\.ssh\devops_vm
-Windows public key: C:\Users\ovlad\.ssh\devops_vm.pub
+Windows private key: C:\Users\Q\.ssh\devops_vm
+Windows public key: C:\Users\Q\.ssh\devops_vm.pub
 
 The public key is installed in /home/devops/.ssh/authorized_keys.
 Directory permissions: 700. File permissions: 600.
@@ -80,7 +81,7 @@ from Git Bash on Windows:
 ssh-copy-id -i ~/.ssh/devops_vm.pub -p 2222 devops@127.0.0.1
 ```
 
-Windows SSH configuration, C:\Users\ovlad\.ssh\config:
+Windows SSH configuration, C:\Users\Q\.ssh\config:
 
 ```sshconfig
 Host devops
@@ -163,14 +164,17 @@ sudo ufw status verbose
 
 Verify a new SSH connection after enabling UFW.
 
-A Windows request to TCP port 8080 produced UFW BLOCK entries:
+An earlier practical-work-5 request, before the DHCP address changed, produced:
 SRC=192.168.56.1, DST=192.168.56.102, PROTO=TCP, DPT=8080.
 
 ## 7. Snapshots and recovery order
 
-- 01-almost-clean-install: initial baseline.
-- 02-keys-configured: user and key authentication configured.
-- 03-ssh-hardened: SSH hardened, before UFW configuration.
+| Snapshot | Created, UTC | Purpose |
+|---|---|---|
+| 01-almost-clean-install | 2026-10-13 17:16:49 | Initial baseline |
+| 02-keys-configured | 2026-10-13 18:13:02 | User and key authentication |
+| 03-ssh-hardened | 2026-10-20 16:49:49 | SSH hardening, before UFW |
+| 04-nginx-https | 2026-10-28 07:49:09 | Nginx and HTTPS |
 
 Recovery order:
 
@@ -182,4 +186,137 @@ Recovery order:
 6. Apply SSH settings and test a new connection through Host-only.
 7. Change the NAT guest port to 2222 and verify ssh devops.
 8. Restore UFW rules, enable it, and verify another SSH connection.
-9. Run scripts/audit.sh: all six checks must pass with exit code 0.
+9. Restore the web server using section 8, then run `sudo bash scripts/audit.sh`.
+   All ten SSH, firewall, and web checks must pass with exit code 0.
+
+## 8. Web server
+
+- Package: `nginx`; verified running version: 1.28.3 on Ubuntu.
+- Site configuration: `/etc/nginx/sites-available/devops-site`.
+- Enabled link: `/etc/nginx/sites-enabled/devops-site`.
+- The default site link is absent; its available configuration is retained.
+- Source-controlled configuration: `config/nginx/devops-site`.
+- Document root: `/var/www/devops-site`, owned by `devops:devops`.
+- Directory mode: 755. HTML file mode: 644.
+- Master process: root. Worker processes: www-data.
+- HTTP: TCP 80, permanent redirect (301) to the same path on HTTPS.
+- HTTPS: TCP 443, TLS 1.2 and TLS 1.3.
+- Access log: `/var/log/nginx/devops-site.access.log`, including HTTP redirects.
+- Error log: `/var/log/nginx/devops-site.error.log`.
+- Certificate: `/etc/ssl/certs/devops.crt`, root-owned, mode 644.
+- Private key: `/etc/ssl/private/devops.key`, root-owned, mode 600.
+- SAN: `DNS:devops.local`; self-signed subject and issuer: `CN=devops.local`.
+- Certificate lifetime: 365 days, 2026-10-28 07:34:07 UTC to 2027-10-28 07:34:07 UTC.
+- HSTS is not configured for this self-signed classroom setup.
+
+Reproduce the configuration on a restored VM:
+
+```bash
+sudo apt update
+sudo apt install -y nginx rsync openssl
+sudo mkdir -p /var/www/devops-site
+sudo chown devops:devops /var/www/devops-site
+sudo chmod 755 /var/www/devops-site
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/private/devops.key \
+  -out /etc/ssl/certs/devops.crt \
+  -subj "/CN=devops.local" \
+  -addext "subjectAltName=DNS:devops.local"
+sudo chown root:root /etc/ssl/private/devops.key /etc/ssl/certs/devops.crt
+sudo chmod 600 /etc/ssl/private/devops.key
+sudo chmod 644 /etc/ssl/certs/devops.crt
+sudo install -m 644 config/nginx/devops-site /etc/nginx/sites-available/devops-site
+sudo ln -sfn /etc/nginx/sites-available/devops-site /etc/nginx/sites-enabled/devops-site
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+The configuration-copy commands assume a copy of this repository is present on
+the VM. Restore the site content from WSL using section 9. A new certificate
+requires copying the new public certificate to the client again. Keep the
+private key on the server; it is not included in this repository.
+
+## 9. WSL client and deployment
+
+- Host-side Linux: Ubuntu under WSL 1, user `q`.
+- Windows checkout: `C:\Users\Q\Other\HW\Devops\Core\tasks`.
+- WSL path: `/mnt/c/Users/Q/Other/HW/Devops/Core/tasks`.
+- Existing repository: `veosp/s2`; base branch: `master`.
+- Practical-work branch: `feature/web-deploy`.
+- The handout calls the base branch `main`; this existing repository uses `master`.
+- WSL private key: `/home/q/.ssh/devops_vm`, mode 600.
+- WSL SSH configuration: `/home/q/.ssh/config`, mode 600.
+- Trusted public certificate: `/home/q/devops.crt`.
+- `.gitattributes` retains LF endings for the shell scripts and exercise artifacts.
+- Repository-local `core.autocrlf=true` matches Git for Windows; `core.fileMode=false`
+  avoids false executable-bit changes on `/mnt/c`.
+- VPN routing/filtering previously blocked WSL traffic and Host-only connections.
+  Successful final checks were performed with the interfering VPN disconnected.
+
+Copy the client configuration from Windows into WSL:
+
+```bash
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+cp /mnt/c/Users/Q/.ssh/devops_vm ~/.ssh/
+cp /mnt/c/Users/Q/.ssh/config ~/.ssh/
+cp /mnt/c/Users/Q/.ssh/known_hosts ~/.ssh/
+chmod 600 ~/.ssh/devops_vm ~/.ssh/config ~/.ssh/known_hosts
+ssh -o BatchMode=yes devops 'hostname -f'
+scp devops:/etc/ssl/certs/devops.crt ~/devops.crt
+```
+
+`BatchMode=yes` makes an unsuitable key fail immediately instead of requesting
+interactive credentials. The existing trusted host-key entries are retained.
+The SSH alias uses NAT port forwarding at 127.0.0.1:2222, whereas web requests
+use the Host-only address 192.168.56.101 directly.
+
+Manual content synchronization from the repository root in WSL:
+
+```bash
+rsync -avz --delete --chmod=D755,F644 --dry-run site/ devops:/var/www/devops-site/
+rsync -avz --delete --chmod=D755,F644 site/ devops:/var/www/devops-site/
+curl --cacert ~/devops.crt -I https://devops.local/
+curl --cacert ~/devops.crt -I https://devops.local/no-such-page
+```
+
+The first request must return 200; the missing page must return 404 with the
+custom error-page body. The trailing slash after `site/` copies its contents.
+The destination path is dedicated to the site; `--delete` removes stale files
+only within that destination.
+
+After committing the exercise files, use:
+
+```bash
+bash scripts/deploy.sh --dry-run
+bash scripts/deploy.sh
+```
+
+The script locates the repository from its own path, rejects missing or
+untracked `site/index.html` and all uncommitted changes, synchronizes using one
+rsync/SSH operation, checks HTTPS using the trusted certificate, and prints the
+short HEAD hash on success. A dry run does not check service availability.
+SSH multiplexing reduces repeated connections during rapid successive runs.
+
+## 10. Verification and evidence
+
+```bash
+# VM
+sudo bash /home/devops/devops-course-2026/scripts/audit.sh
+echo $?
+
+# WSL, repository root: offline contract tests
+bash tests/test-deploy.sh
+```
+
+The audit checks SSH, UFW, Nginx service state and configuration, at least 30 days
+of certificate lifetime, absence of world-writable site content, and private-key
+ownership/mode. `CERT_MIN_DAYS=400` deliberately exercises the expiry failure.
+
+`scripts/practice6-verify.sh` is a VM-only, sudo-run classroom verifier. It
+records permission experiments, a short real Nginx outage, audit failures and
+recovery, and HTTP-log analysis. It restores the working content, safe modes,
+and Nginx before returning. Raw transcripts are in `evidence/practice6/`, ignored
+by Git. See `docs/practice6-validation.md` for the distinction between real
+integration evidence and mocked contract tests, and `docs/practice6-screenshots.md`
+for a short screenshot checklist.

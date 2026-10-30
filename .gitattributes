@@ -1,0 +1,8 @@
+.gitattributes text eol=lf
+.gitignore text eol=lf
+scripts/*.sh text eol=lf
+tests/*.sh text eol=lf
+site/*.html text eol=lf
+docs/server-setup.md text eol=lf
+docs/practice6-*.md text eol=lf
+config/nginx/* text eol=lf
