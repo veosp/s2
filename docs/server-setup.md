@@ -175,6 +175,8 @@ SRC=192.168.56.1, DST=192.168.56.102, PROTO=TCP, DPT=8080.
 | 02-keys-configured | 2026-10-13 18:13:02 | User and key authentication |
 | 03-ssh-hardened | 2026-10-20 16:49:49 | SSH hardening, before UFW |
 | 04-nginx-https | 2026-10-28 07:49:09 | Nginx and HTTPS |
+| before-practice7 | 2026-10-28 13:24:09 | Completed practice 6, before Docker installation |
+| 05-docker-compose | 2026-10-28 14:21:38 | Working application, database and reverse proxy |
 
 Recovery order:
 
@@ -186,8 +188,8 @@ Recovery order:
 6. Apply SSH settings and test a new connection through Host-only.
 7. Change the NAT guest port to 2222 and verify ssh devops.
 8. Restore UFW rules, enable it, and verify another SSH connection.
-9. Restore the web server using section 8, then run `sudo bash scripts/audit.sh`.
-   All ten SSH, firewall, and web checks must pass with exit code 0.
+9. Restore the web server using section 8 and containers using section 9, then
+   run `sudo bash scripts/audit.sh`. All fourteen checks must pass with exit 0.
 
 ## 8. Web server
 
@@ -201,6 +203,7 @@ Recovery order:
 - Master process: root. Worker processes: www-data.
 - HTTP: TCP 80, permanent redirect (301) to the same path on HTTPS.
 - HTTPS: TCP 443, TLS 1.2 and TLS 1.3.
+- Reverse proxy: `/app/` forwards to `http://127.0.0.1:5000/`; static `/` is retained.
 - Access log: `/var/log/nginx/devops-site.access.log`, including HTTP redirects.
 - Error log: `/var/log/nginx/devops-site.error.log`.
 - Certificate: `/etc/ssl/certs/devops.crt`, root-owned, mode 644.
@@ -232,11 +235,81 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 
 The configuration-copy commands assume a copy of this repository is present on
-the VM. Restore the site content from WSL using section 9. A new certificate
+the VM. Restore the site content from WSL using section 10. A new certificate
 requires copying the new public certificate to the client again. Keep the
 private key on the server; it is not included in this repository.
 
-## 9. WSL client and deployment
+## 9. Containerization
+
+- Engine: Docker CE 29.9.2 from the official `download.docker.com` Ubuntu apt repository.
+- Compose plugin: 5.6.1. Buildx: 0.38.1. The `docker.io` and Snap packages are not used.
+- Install helper: `scripts/install-docker-engine.sh`; installation transcript is in
+  `evidence/practice7/docker-install.log`.
+- Docker-enabled user: `devops`, already a sudo administrator. Docker-group
+  membership grants root-equivalent access to the Docker host.
+- Host source directory: the repository's `app/` directory in WSL.
+- VM project directory: `/home/devops/app`; Compose project name: `app`.
+- Container names: `app-app-1` and `app-db-1`.
+- App image: `devops-app:1.0`, based on `python:3.12-slim`.
+- Database image: `postgres:16-alpine`; keep the major version fixed for this data volume.
+- Main process: Gunicorn in exec form, user `app`, observed UID/GID 999.
+- Image source files are root-owned and mode 644; the app user cannot modify them.
+- Application publication: `127.0.0.1:5000:5000` only.
+- PostgreSQL listens on container port 5432, with no published host port.
+- Private Compose bridge: `app_backend`; the app resolves the database as `db`.
+- Persistent named volume: `app_db_data`, mounted at `/var/lib/postgresql/data`.
+- Server-only secret file: `/home/devops/app/.env`, owned by devops, mode 600.
+- Public template: `app/.env.example`. `.gitignore` and `.dockerignore` exclude `.env`.
+- Dependency versions follow the handout: Flask 3.0.3, psycopg2-binary 2.9.9, Gunicorn 22.0.0.
+- Database readiness uses `pg_isready`; app startup waits for `service_healthy`.
+- The app has an HTTP `/health` healthcheck. Both services use `unless-stopped`.
+- Container logs are rotated at 10 MiB, retaining three files per service.
+
+Initial Docker installation on the VM:
+
+```bash
+sudo bash ~/devops-course-2026/scripts/install-docker-engine.sh
+```
+
+Reconnect SSH after joining the docker group. Verify `docker version`,
+`docker compose version`, and `docker run --rm hello-world` as devops.
+
+Transfer application source from the repository root in WSL:
+
+```bash
+rsync -avz --delete --exclude=.env --chmod=D755,F644 --dry-run app/ devops:app/
+rsync -avz --delete --exclude=.env --chmod=D755,F644 app/ devops:app/
+```
+
+The exclusion protects the existing server `.env` from `--delete`. On a fresh VM,
+create the secret locally and start the project as devops:
+
+```bash
+cd ~/app
+if [ ! -f .env ]; then
+  (umask 077; printf 'POSTGRES_DB=app\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=%s\nDB_HOST=db\n' "$(openssl rand -hex 16)" > .env)
+fi
+chmod 600 .env
+docker compose config --quiet
+docker compose up -d --build --wait --wait-timeout 120
+docker compose ps
+curl -f http://127.0.0.1:5000/health
+```
+
+The password is generated only on the VM and is never copied into the host
+checkout. Avoid printing expanded `docker compose config` output or complete
+container environment dumps into the report; `--quiet` validates without secrets.
+
+Nginx forwards `/app/` to the app and strips that prefix because `proxy_pass`
+ends in `/`. It passes Host, X-Real-IP, X-Forwarded-For and X-Forwarded-Proto.
+The existing HTTPS certificate and static document root are unchanged.
+
+`docker compose down` preserves `app_db_data`. `down -v` deletes project volumes;
+the destructive demonstration was performed on an isolated disposable project
+using loopback port 5002. The main volume was preserved. The temporary public
+port-5001 demonstration and deliberately public port-5000 audit test were restored.
+
+## 10. WSL client and deployment
 
 - Host-side Linux: Ubuntu under WSL 1, user `q`.
 - Windows checkout: `C:\Users\Q\Other\HW\Devops\Core\tasks`.
@@ -298,7 +371,7 @@ rsync/SSH operation, checks HTTPS using the trusted certificate, and prints the
 short HEAD hash on success. A dry run does not check service availability.
 SSH multiplexing reduces repeated connections during rapid successive runs.
 
-## 10. Verification and evidence
+## 11. Verification and evidence
 
 ```bash
 # VM
@@ -312,6 +385,12 @@ bash tests/test-deploy.sh
 The audit checks SSH, UFW, Nginx service state and configuration, at least 30 days
 of certificate lifetime, absence of world-writable site content, and private-key
 ownership/mode. `CERT_MIN_DAYS=400` deliberately exercises the expiry failure.
+
+Practice 7 adds four checks: Docker active, database healthy, loopback-only app
+publication with no database publication, and server `.env` mode/ownership.
+The current total is fourteen; the saved practice-6 transcripts retain their
+original ten-check results. Use `docs/practice7-validation.md` and
+`docs/practice7-screenshots.md` for container tests and report evidence.
 
 `scripts/practice6-verify.sh` is a VM-only, sudo-run classroom verifier. It
 records permission experiments, a short real Nginx outage, audit failures and

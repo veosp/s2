@@ -67,5 +67,29 @@ if WORLD_WRITABLE="$(root_command find "$SITE_DIR" -perm -0002 -print)" \
     CONTENT_STATE='safe'
 fi
 check 'No world-writable content; TLS key is root-owned with mode 600' safe "$CONTENT_STATE"
+printf '[5] Containers\n'
+APP_DIR='/home/devops/app'
+check 'Docker service is active' active "$(systemctl is-active docker 2>/dev/null)"
+DB_CONTAINER="$(root_command docker compose -f "$APP_DIR/docker-compose.yml" ps -q db 2>/dev/null)"
+APP_CONTAINER="$(root_command docker compose -f "$APP_DIR/docker-compose.yml" ps -q app 2>/dev/null)"
+DB_HEALTH='missing'
+if [[ -n "$DB_CONTAINER" ]]; then
+    DB_HEALTH="$(root_command docker inspect --format '{{.State.Health.Status}}' "$DB_CONTAINER" 2>/dev/null)"
+fi
+check 'PostgreSQL container is healthy' healthy "$DB_HEALTH"
+PORT_STATE='unsafe'
+UNEXPECTED_LISTENERS="$(ss -H -tln | awk '$4 ~ /:(5000|5432)$/ && $4 !~ /^127[.]0[.]0[.]1:/ {print $4}')"
+APP_BINDINGS=''
+DB_BINDINGS=''
+if [[ -n "$APP_CONTAINER" && -n "$DB_CONTAINER" ]]; then
+    APP_BINDINGS="$(root_command docker port "$APP_CONTAINER" 5000/tcp 2>/dev/null)"
+    DB_BINDINGS="$(root_command docker port "$DB_CONTAINER" 2>/dev/null)"
+    if [[ -z "$UNEXPECTED_LISTENERS" && "$APP_BINDINGS" == '127.0.0.1:5000' && -z "$DB_BINDINGS" ]]; then
+        PORT_STATE='safe'
+    fi
+fi
+check 'App is loopback-only and database ports are unpublished' safe "$PORT_STATE"
+check 'Server .env is devops-owned with mode 600' '600:devops' \
+    "$(root_command stat -c '%a:%U' "$APP_DIR/.env" 2>/dev/null)"
 printf 'Passed: %s; failed: %s\n' "$PASS" "$FAIL"
 ((FAIL == 0))
