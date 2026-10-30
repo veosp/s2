@@ -19,3 +19,15 @@ Commands selected during the practical exercises. Keep each complete command on 
 | `curl -k -I https://devops.local` | Request HTTPS headers while skipping certificate verification; useful only for the comparison exercise. |
 | `rsync -avz --delete --chmod=D755,F644 --dry-run site/ devops:/var/www/devops-site/` | Preview synchronization without changing the server. `-a`: recursive archive mode; `-v`: verbose; `-z`: compression; `--delete`: remove stale destination files; `--chmod`: normalize directory/file modes. The slash after `site/` means its contents. |
 | `rsync -avz --delete --chmod=D755,F644 site/ devops:/var/www/devops-site/` | Perform the same synchronization after reviewing the dry-run plan. |
+| `docker version` | Show Docker client and daemon versions; both sections must be available. |
+| `docker compose version` | Show the installed Compose plugin version. |
+| `docker build -t devops-app:1.0 .` | Build the application image from the current directory and assign its tag. |
+| `docker history devops-app:1.0` | Show image-layer history and instruction sizes. |
+| `docker compose up -d --build --wait` | Build and start the project in the background, waiting for its readiness checks. |
+| `docker compose ps` | Show Compose service status, health and port publication. |
+| `docker compose exec -T app id` | Run id inside the app container without allocating a terminal; verifies the non-root user. |
+| `docker compose exec -T app getent ahostsv4 db` | Resolve the database service name through the Compose network's DNS, requesting IPv4 results. |
+| `docker port app-app-1` | Show the app container's host port mappings; expected 127.0.0.1:5000 only. |
+| `docker compose down` | Remove project containers and networks while preserving named data volumes. |
+| `docker compose down -v` | Also delete the project's named volumes and their data. The classroom demonstration uses a separate disposable project. |
+| `rsync -avz --delete --exclude=.env --chmod=D755,F644 app/ devops:app/` | Synchronize app source while preserving the server-only .env file and normalizing modes. Preview with --dry-run first. |

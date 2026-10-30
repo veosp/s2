@@ -6,3 +6,7 @@ site/*.html text eol=lf
 docs/server-setup.md text eol=lf
 docs/practice6-*.md text eol=lf
 config/nginx/* text eol=lf
+app/* text eol=lf
+docs/practice7-*.md text eol=lf
+scripts/*.py text eol=lf
+docs/command-reference.md text eol=lf
