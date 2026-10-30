@@ -41,8 +41,6 @@ RSYNC_OPTIONS=(-avz --delete --chmod=D755,F644)
 if [[ "$DRY_RUN" == true ]]; then
     RSYNC_OPTIONS+=(--dry-run)
 fi
-# One rsync invocation means at most one new SSH connection. A short-lived
-# multiplexed connection also avoids repeated authentication during rapid runs.
 SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=5 -o ControlMaster=auto -o ControlPersist=60 -o ControlPath=~/.ssh/devops-%C'
 printf 'Source: %s\nDestination: %s:%s\n' "$LOCAL_DIR" "$REMOTE" "$REMOTE_DIR"
 if ! rsync "${RSYNC_OPTIONS[@]}" -e "$SSH_COMMAND" -- "$LOCAL_DIR" "${REMOTE}:${REMOTE_DIR}"; then
