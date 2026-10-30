@@ -41,9 +41,6 @@ Ubuntu /etc/hosts entry:
 
 Verification: `ip -brief address` and `hostname -f`.
 
-VPN routing previously interfered with Host-only access.
-The successful SSH connection by hostname was tested with VPN disabled.
-
 ## 3. Port forwarding
 
 Adapter 1, NAT, TCP:
@@ -52,8 +49,6 @@ Adapter 1, NAT, TCP:
 - Host port: 2222.
 - Guest address: unspecified.
 - Guest port: 2222.
-
-Before SSH hardening, the guest port was 22.
 
 ## 4. User accounts and authentication
 
@@ -164,9 +159,6 @@ sudo ufw status verbose
 
 Verify a new SSH connection after enabling UFW.
 
-An earlier practical-work-5 request, before the DHCP address changed, produced:
-SRC=192.168.56.1, DST=192.168.56.102, PROTO=TCP, DPT=8080.
-
 ## 7. Snapshots and recovery order
 
 | Snapshot | Created, UTC | Purpose |
@@ -231,29 +223,20 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-The configuration-copy commands assume a copy of this repository is present on
-the VM. Restore the site content from WSL using section 9. A new certificate
-requires copying the new public certificate to the client again. Keep the
-private key on the server; it is not included in this repository.
+Run the configuration-copy commands from the repository on the VM.
+Copy a regenerated public certificate to the client again.
 
 ## 9. WSL client and deployment
 
-- Host-side Linux: Ubuntu under WSL 1, user `q`.
+- Client: Ubuntu under WSL 1, user q.
+- Repository: veosp/s2, default branch main.
 - Windows checkout: `C:\Users\Q\Other\HW\Devops\Core\tasks`.
-- WSL path: `/mnt/c/Users/Q/Other/HW/Devops/Core/tasks`.
-- Existing repository: `veosp/s2`; base branch: `master`.
-- Practical-work branch: `feature/web-deploy`.
-- The handout calls the base branch `main`; this existing repository uses `master`.
-- WSL private key: `/home/q/.ssh/devops_vm`, mode 600.
-- WSL SSH configuration: `/home/q/.ssh/config`, mode 600.
-- Trusted public certificate: `/home/q/devops.crt`.
-- `.gitattributes` retains LF endings for the shell scripts and exercise artifacts.
-- Repository-local `core.autocrlf=true` matches Git for Windows; `core.fileMode=false`
-  avoids false executable-bit changes on `/mnt/c`.
-- VPN routing/filtering previously blocked WSL traffic and Host-only connections.
-  Successful final checks were performed with the interfering VPN disconnected.
+- WSL checkout: `/mnt/c/Users/Q/Other/HW/Devops/Core/tasks`.
+- SSH private key: `/home/q/.ssh/devops_vm`, mode 600.
+- SSH configuration: `/home/q/.ssh/config`, mode 600.
+- Trusted certificate: `/home/q/devops.crt`.
 
-Copy the client configuration from Windows into WSL:
+Client configuration [WSL]:
 
 ```bash
 mkdir -p ~/.ssh
@@ -262,16 +245,12 @@ cp /mnt/c/Users/Q/.ssh/devops_vm ~/.ssh/
 cp /mnt/c/Users/Q/.ssh/config ~/.ssh/
 cp /mnt/c/Users/Q/.ssh/known_hosts ~/.ssh/
 chmod 600 ~/.ssh/devops_vm ~/.ssh/config ~/.ssh/known_hosts
+git config core.fileMode false
 ssh -o BatchMode=yes devops 'hostname -f'
 scp devops:/etc/ssl/certs/devops.crt ~/devops.crt
 ```
 
-`BatchMode=yes` makes an unsuitable key fail immediately instead of requesting
-interactive credentials. The existing trusted host-key entries are retained.
-The SSH alias uses NAT port forwarding at 127.0.0.1:2222, whereas web requests
-use the Host-only address 192.168.56.101 directly.
-
-Manual content synchronization from the repository root in WSL:
+Initial site delivery from the repository root [WSL]:
 
 ```bash
 rsync -avz --delete --chmod=D755,F644 --dry-run site/ devops:/var/www/devops-site/
@@ -280,43 +259,16 @@ curl --cacert ~/devops.crt -I https://devops.local/
 curl --cacert ~/devops.crt -I https://devops.local/no-such-page
 ```
 
-The first request must return 200; the missing page must return 404 with the
-custom error-page body. The trailing slash after `site/` copies its contents.
-The destination path is dedicated to the site; `--delete` removes stale files
-only within that destination.
-
-After committing the exercise files, use:
+Subsequent deployment requires a clean working tree [WSL]:
 
 ```bash
 bash scripts/deploy.sh --dry-run
 bash scripts/deploy.sh
 ```
 
-The script locates the repository from its own path, rejects missing or
-untracked `site/index.html` and all uncommitted changes, synchronizes using one
-rsync/SSH operation, checks HTTPS using the trusted certificate, and prints the
-short HEAD hash on success. A dry run does not check service availability.
-SSH multiplexing reduces repeated connections during rapid successive runs.
-
-## 10. Verification and evidence
+Configuration audit [VM]:
 
 ```bash
-# VM
-sudo bash /home/devops/devops-course-2026/scripts/audit.sh
+sudo bash ~/devops-course-2026/scripts/audit.sh
 echo $?
-
-# WSL, repository root: offline contract tests
-bash tests/test-deploy.sh
 ```
-
-The audit checks SSH, UFW, Nginx service state and configuration, at least 30 days
-of certificate lifetime, absence of world-writable site content, and private-key
-ownership/mode. `CERT_MIN_DAYS=400` deliberately exercises the expiry failure.
-
-`scripts/practice6-verify.sh` is a VM-only, sudo-run classroom verifier. It
-records permission experiments, a short real Nginx outage, audit failures and
-recovery, and HTTP-log analysis. It restores the working content, safe modes,
-and Nginx before returning. Raw transcripts are in `evidence/practice6/`, ignored
-by Git. See `docs/practice6-validation.md` for the distinction between real
-integration evidence and mocked contract tests, and `docs/practice6-screenshots.md`
-for a short screenshot checklist.
