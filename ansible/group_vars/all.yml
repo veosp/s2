@@ -1,0 +1,6 @@
+---
+app_image: ghcr.io/veosp/devops-ci-app
+app_tag: "29f3c2321edf91d86b4321769fb8f344680dd614"
+app_container_name: devops-ci-app
+app_host_port: 5000
+app_internal_port: 5000

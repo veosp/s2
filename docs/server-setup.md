@@ -298,7 +298,30 @@ docker compose ps
 curl -f http://127.0.0.1:5000/health
 ```
 
-## 10. WSL client and deployment
+## 10. Ansible
+
+| Setting | Value |
+|---|---|
+| Project | `ansible/` |
+| Control node | `devops-control` running Ubuntu |
+| Managed VM | `devops-ansible`, `192.168.56.103` |
+| Bootstrap | `inventory/bootstrap.ini`, `q` on SSH port 22 |
+| Production | `inventory/prod.ini`, `devops` with the local `~/.ssh/devops_vm` key |
+| Roles | `base` installs packages and Docker, `ssh` configures access and UFW, `nginx` configures the proxy, `app` deploys the container |
+| Image | `ghcr.io/veosp/devops-ci-app:29f3c2321edf91d86b4321769fb8f344680dd614` |
+| App port | `127.0.0.1:5000:5000` |
+| External health | `http://192.168.56.103/health` |
+
+Run from `ansible/` on the control node.
+
+```bash
+ansible-galaxy collection install -r requirements.yml
+ansible-playbook -i inventory/bootstrap.ini site.yml --ask-pass --ask-become-pass
+ansible-playbook site.yml
+ansible-playbook verify.yml
+```
+
+## 11. WSL client and deployment
 
 - Client: Ubuntu under WSL 1, user q.
 - Repository: veosp/s2, default branch main.
